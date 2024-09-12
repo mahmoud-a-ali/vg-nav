@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<launch>
+
+ 
+    <!-- load yaml file with all ros param -->
+    <!-- <rosparam file="$(find vsgp_nav_glb)/config/pid_param.yaml" /> -->
+
+
+
+    <!-- PID tracking -->
+        <!-- <node name="pid_node" pkg="waypts_nav_pid" type="tracking_pid_node.py"  output="screen"  > -->
+        <node name="pid_node" pkg="waypts_nav_pid" type="jackal_sim_pid.py"  output="screen"  >
+            <remap from="odom" to="ground_truth/state"/> 
+            <!-- <remap from="odom" to="aft_mapped_to_init"/>  -->
+            <!-- <remap from="odom" to="/transformed_odom"/>  -->
+            <!-- <remap from="cmd_vel" to="jackal_velocity_controller/cmd_vel"/> -->
+        </node>
+
+
+
+
+
+</launch>
+

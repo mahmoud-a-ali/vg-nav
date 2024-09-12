@@ -1,0 +1,79 @@
+######## Pose PCL #######
+proj_lfrq: 0.0          # in case we want to slow down the frequncy for observations
+oc_srfc_rds : 8         # radius of the occupancy surface
+org_oc_srfc_rds_viz: 9 # visualization radius of the occupancy surface in rviz
+velodyne_frame: "velodyne"
+scan_frame: "velodyne"
+
+######## Nav #########
+pcl_skp: 3  #Downsampling pointcloud 
+
+gl_x: 12  # x-coordinate of the goal 
+# gl_y: -11 # 10 # y-coordinate of the goal 
+gl_y: 6 # y-coordinate of the goal 
+
+gp_nav_indpts_sz   : 400 # NO. of inducing points 
+var_km : 0.5
+var_kv : 0.03
+
+
+
+sb_gl_dst     : 5
+
+gmtry_nav_mode: 0
+v_nvgblti_th: 16.5 # should not be int # any lnp has less than 20 vis-navigable rows is then non-navigable
+k_dir       : 0.0   # direction factor
+k_dst       : 0.99 #0.3  # distance factor  
+k_nav       : 0.5 #0.7
+
+
+gp_oc_srfc_rds_viz : 8     # visualization radius of the gp occupancy surface in rviz
+gp_nav_var_viz     : 8    # visualization radius of the variance surface in rviz
+grad_rds_viz       : 8   
+nav_gp_rds_viz : 8
+
+gp_nav_var_img_viz : False  # for debugging: show the occupancy surface as an images with gp-frontiers as points 
+gp_nav_aug_data    : False  # make the GP a peroidic GP
+
+gp_nav_lcl         : False   ## goal is represented in the robot frame
+gp_nav_glbl        : True    ## goal is represented in the world frame
+
+
+######## diff_drive parameters #########
+KP   : 0.2
+KA   : 0.5     #        #ka>kp
+KB   : -0.1     #        #kb -ve
+rate : 5    #  
+forwardMovementOnly     : True
+
+max_linear_speed  : 0.8   #
+min_linear_speed  : -0.8   #
+
+max_angular_speed : 1.0     #
+min_angular_speed : -1.0    #
+
+linear_tolerance  : 0.1        #
+angular_tolerance : 0.1     #
+
+max_linear_acceleration : 0.1  #
+max_angular_acceleration: 0.1   #
+
+
+# max_linear_speed  : 1.0   #
+# min_linear_speed  : -1.0   #
+
+# max_angular_speed : 1.2     #
+# min_angular_speed : -1.2    #
+
+# linear_tolerance  : 0.4        #
+# angular_tolerance : 0.4     #
+
+# max_linear_acceleration : 0.1  #
+# max_angular_acceleration: 0.1   #
+
+
+# v= kp* dst 
+# w= ka*a + kb*b
+# a = -cur.theta + goal_heading( atan2(yg-yc/xg-xc) )
+# theta = self.normalize_pi(cur.theta - goal.theta)
+# b = -theta - a

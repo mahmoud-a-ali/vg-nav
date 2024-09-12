@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<launch>
+
+
+    <node name="vg_sync_node" pkg="vg_gpn" type="vg_sync_node.py"  output="screen"  >
+            
+            <!-- <remap from="odom" to="/t265/odom/sample" /> -->
+            <!-- <remap from="vlp_pcl" to="/velodyne_points" /> -->
+            <!-- <remap from="cam_pcl" to="/d400/depth/color/points" /> -->
+            <!-- <remap from="cam_img" to="/d400/color/image_raw" /> -->
+
+            <remap from="odom" to="/aft_mapped_to_init" />
+            <remap from="vlp_pcl" to="/velodyne_points" />
+            <remap from="cam_pcl" to="/camera/depth/color/points" />
+            <remap from="cam_img" to="/camera/color/image_raw" />
+            
+    </node> 
+
+
+
+
+
+</launch>
+

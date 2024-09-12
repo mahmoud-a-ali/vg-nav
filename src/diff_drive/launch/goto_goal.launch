@@ -1,0 +1,23 @@
+<launch>
+
+
+
+  <node name="diff_drive_go_to_goal" pkg="diff_drive" type="diff_drive_go_to_goal" output="screen">
+    <param name="~rate" value="20" />
+    <param name="~kP" value="0.2" />
+    <param name="~kA" value="0.5" />
+    <param name="~kB" value="-0.8" />
+    <param name="~max_linear_speed" value="1.0" />
+    <param name="~min_linear_speed" value="0.00" />
+    <param name="~max_angular_speed" value="0.9" />
+    <param name="~min_angular_speed" value="-0.9" />
+    <param name="~linear_tolerance" value="0.4" />
+    <param name="~angular_tolerance" value="0.2" />
+    <param name="~forwardMovementOnly" value="true" />
+    <remap from="cmd_vel" to="/jackal_velocity_controller/cmd_vel" />
+    <remap from="odom" to="/ground_truth/state" />
+  </node>
+
+
+
+</launch>
