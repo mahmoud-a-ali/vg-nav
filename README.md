@@ -1,6 +1,9 @@
 # vg-nav
 [Visual-Geometry GP-based Navigable Space for Autonomous Navigation]
 
+## Main contribution 
+- our main contribution is the `vg_nav` package, other packages are adapoted from other repos to run the simulator.
+
 
 ### Dependencies
 - tensorflow (TF)
@@ -20,7 +23,7 @@ roslaunch jackal_gazebo postoffice_mud.launch
 ```bash
 roslaunch vg_gpn vg_gpn_real.launch 
 ```
-- Note: for simulation we are doing the segmentation based on the RGB values of the raw image. To tune the minimum and maximum values for each channel, we use the `rq_reconfigure` package. the values working for the postoffice_mud environment is stored in the `config` file. After you tune the RGB values and check the generated `nav_image` in `rviz`, run the `pid_tracking_node`.
+- Note: for simulation we are doing the segmentation based on the RGB values of the raw image. To tune the minimum and maximum values for each channel, we use the `rq_reconfigure` package. the values working for the postoffice_mud environment is stored in the `cfg` file. After you tune the RGB values and check the generated `nav_image` in `rviz`, run the `pid_tracking_node`.
 3. Run the PID controller to move the robot to the select visual-geometry local navigation point `VG-LNP`
 ```bash
 roslaunch waypts_nav_pid pid_tracking.launch 
