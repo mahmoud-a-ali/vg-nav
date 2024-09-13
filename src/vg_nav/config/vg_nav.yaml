@@ -10,8 +10,8 @@ gmtry_nav_mode: True # True means geometry, False means visual-geometry
 v_nvgblti_th: 16.5 # should not be int # any lnp has less than 20 vis-navigable rows is then non-navigable
 
 ######## Goal #######
-gl_x: 12  # x-coordinate of the goal  
-gl_y: 6 # y-coordinate of the goal 
+gl_x: 14  # x-coordinate of the goal  
+gl_y: -1 # y-coordinate of the goal 
 
 
 ######## Nav #########

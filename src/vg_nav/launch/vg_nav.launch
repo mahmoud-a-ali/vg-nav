@@ -23,7 +23,15 @@
 
     </node> 
 
+
+    <node name="rgb_seg" pkg="vg_nav" type="rgb_seg">
+    </node> 
+
     <node name="vg_nav_node" pkg="vg_nav" type="vg_nav_node.py"  output="screen"  >
+    </node> 
+
+
+    <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure" >
     </node> 
 
 </launch>
