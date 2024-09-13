@@ -1,6 +1,7 @@
 import os
-import io
-import warnings
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__)))
+
 import numpy as np
 from time import time
 from scipy import stats
@@ -13,132 +14,30 @@ from sensor_msgs.msg import Image, PointCloud2
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointField
 from sensor_msgs import point_cloud2
-from std_msgs.msg import Header, Bool
-from vg_nav.msg import PclObsv
-from vg_nav.msg import PosePcl2
-from geometry_msgs.msg import PoseStamped, PointStamped
+from std_msgs.msg import Header
+from geometry_msgs.msg import PoseStamped
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
-import cv2
-from cv_bridge import CvBridge , CvBridgeError 
+from cv_bridge import CvBridge 
 from tf.transformations import quaternion_from_euler
 
+from sgp2d import SGP2D
+from nav_utils import convert_spherical_to_cartesian, convert_cartesian_to_spherical, normalize_array, create_quaternion
 
-### to disable GPU: 
-# os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
-
-#### tensorflow 
 import tensorflow as tf
+# os.environ["CUDA_VISIBLE_DEVICES"]="-1" # to disable GPU
 tf.device("gpu:0") ### to select GPU
-
-## gpflow
-import gpflow
-from gpflow.config import default_float
-from gpflow.ci_utils import ci_niter
-from gpflow.utilities import to_default_float
-from gpflow import set_trainable
-from gpflow.utilities import print_summary
-
-
-#### configurations
-warnings.filterwarnings("ignore")
-gpflow.config.set_default_float(np.float32)
-np.random.seed(0)
-tf.random.set_seed(0)
-
-# from visualization_msgs.msg import Marker
-# from visualization_msgs.msg import MarkerArray
-# from geometry_msgs.msg import Point
-# from std_msgs.msg import ColorRGBA 
-
-
-#@Class SGP2D
-class SGP2D:
-    def __init__(self):
-        self.model = None
-        self.data = None
-        self.kernel1 = None
-        self.kernel2 = None
-        self.kernel = None
-        self.indpts = None
-        self.meanf =  gpflow.mean_functions.Constant(0)
-
-    def set_kernel_param(self, ls1, ls2, var, alpha, noise, noise_var):
-        self.kernel1 = gpflow.kernels.RationalQuadratic(lengthscales= [ls1, ls2])
-        self.kernel1.variance.assign(var) 
-        self.kernel1.alpha.assign(alpha) 
-
-        self.kernel2 = gpflow.kernels.White(noise)
-        self.kernel2.variance.assign(noise_var)
-        self.kernel = self.kernel1 + self.kernel2
-
-    def set_empty_data(self):  
-        in_init, out_init = np.zeros((0, 2)), np.zeros((0, 1))  # input dim:2 
-        mdl_in = tf.Variable(in_init, shape=(None, 2), dtype=tf.float32)
-        mdl_out = tf.Variable(out_init, shape=(None,1), dtype=tf.float32)
-        self.data = (mdl_in, mdl_out)
-
-    def set_training_data(self, d_in, d_out):  
-        mdl_in = tf.Variable(d_in,  dtype=tf.float32)
-        mdl_out = tf.Variable(d_out, dtype=tf.float32)
-        self.data = (mdl_in, mdl_out)
-
-    def set_empty_indpts(self): 
-        indpts_init = np.zeros((0, 2)) 
-        self.indpts = tf.Variable(indpts_init, shape=(None, 2), dtype=tf.float32)
-
-    def set_indpts_from_training_data(self, indpts_size, in_data):
-        data_size = np.shape(in_data)[0]
-        pts_idx = range(0, data_size, max(1, int(data_size/indpts_size) ) )
-        self.indpts = in_data[[idx for idx in pts_idx], :]
-
-    def set_init_mean(self, init_mean):
-        self.meanf = gpflow.mean_functions.Constant(init_mean)
-        
-    def set_sgp_model(self):
-        self.model = gpflow.models.SGPR( self.data, self.kernel, self.indpts, mean_function = self.meanf)
-
-    def select_trainable_param(self):  
-        set_trainable(self.kernel1.variance, False)
-        set_trainable(self.kernel1.lengthscales, False)
-        set_trainable(self.kernel2.variance, False)
-        # set_trainable(self.kernel1.alpha, False)
-        set_trainable(self.model.likelihood.variance, False)
-        # set_trainable(self.model.inducing_variable, False)
-
-    def minimize_loss(self):
-        # tm= time()
-        self.model.training_loss_closure()  # compile=True default wraps in tf.function()
-        # print("SGP2D:: minimize_loss time: ", time() - tm)
-
-    def adam_optimize_param(self):
-        # tm= time()
-        optimizer = tf.optimizers.Adam()
-        optimizer.minimize(self.model.training_loss, self.model.trainable_variables)  
-        # print("SGP2D:: adam_optimize_param time: ", time() - tm)
-   
-
 
 #@ class VGNav
 class VGNav:
     def __init__(self):
-        # Node initialization
         rospy.init_node("vg_nav")
         print("##############################################")
         print("    Initialize visual_geometry_navigation     ")
         print("##############################################")
 
-        #### sim vs real 
-        sim_exp = 1
-        if sim_exp:
-            self.cam_lnk_frame = "front_realsense"
-            self.bslnk_vldyne_z = 0.322
-        else:
-            self.cam_lnk_frame = "camera_link"
-            self.bslnk_vldyne_z = 0.4
-            
         #### subscriber 
         self.cam_pcl_sub   = Subscriber('sync_cam_pcl', PointCloud2)
         self.vlp_pcl_sub   = Subscriber("sync_vlp_pcl", PointCloud2)
@@ -213,6 +112,8 @@ class VGNav:
         self.nav_gp_rds_viz     = rospy.get_param('/nav_gp_rds_viz') 
         self.gl_x               = rospy.get_param('/gl_x')
         self.gl_y               = rospy.get_param('/gl_y')
+        self.log_data           = rospy.get_param('/log_data')
+        self.sim           = rospy.get_param('/sim')
         self.gl_wrt_wrld        = np.array([self.gl_x, self.gl_y, 1], dtype="float32")
         self.vldyn_hdr    =  Header()
         self.vldyn_hdr.frame_id    =  "velodyne"
@@ -234,8 +135,19 @@ class VGNav:
                   PointField('z', 8, PointField.FLOAT32, 1),
                   PointField('intensity', 12, PointField.FLOAT32, 1)]
 
-        self.print_ros_param()
-        # self.data_files()
+
+        #### sim vs real 
+        if self.sim:
+            self.cam_lnk_frame = "front_realsense"
+            self.bslnk_vldyne_z = 0.322
+        else:
+            self.cam_lnk_frame = "camera_link"
+            self.bslnk_vldyne_z = 0.4
+            
+        if self.log_data:
+            self.data_files()
+
+        self.print_ros_param()    
         rospy.sleep(1)
         rospy.spin()
 
@@ -246,8 +158,9 @@ class VGNav:
         self.vis_fit_t = None
         self.vis_prdct_t = None
         timestr = datetime.now() 
-        vis_geo_dir = "/home/vail/Mahmoud/seg_gp_ws/"
+        vis_geo_dir = "../../../logs/"
         itr_folder = vis_geo_dir + "exp_" + str(timestr)
+        print("save data to ", itr_folder)
         if not os.path.exists(itr_folder):
             os.mkdir(itr_folder)
         # self.param_file  = itr_folder +"/hyper_param.txt"
@@ -307,7 +220,7 @@ class VGNav:
         print("\ncam_crnr_grd: ", cam_crnr_grd)
 
         cam_crnr_dst = 9*np.ones(cam_crnr_grd.shape[0])
-        x_cam, y_cam, z_cam = self.convert_spherical_2_cartesian(cam_crnr_grd.T[0], cam_crnr_grd.T[1], cam_crnr_dst)
+        x_cam, y_cam, z_cam = convert_spherical_to_cartesian(cam_crnr_grd.T[0], cam_crnr_grd.T[1], cam_crnr_dst)
         cam_crnr_xyz = np.column_stack((x_cam, y_cam, z_cam, cam_crnr_dst))
         print("\ncam_crnr_xyz: ", x_cam, y_cam, z_cam)
 
@@ -316,7 +229,7 @@ class VGNav:
         z_vlp = z_cam - 0.184
         vlp_crnr_xyz = np.column_stack((x_vlp, y_vlp, z_vlp, 0*cam_crnr_dst))
         print("\nvlp_crnr_xyz: ", x_vlp, y_vlp, z_vlp)
-        vlp_crnr_ths, vlp_crnr_als, dst_crnr_als = self.convert_cartesian_2_spherical(x_vlp, y_vlp, z_vlp)
+        vlp_crnr_ths, vlp_crnr_als, dst_crnr_als = convert_cartesian_to_spherical(x_vlp, y_vlp, z_vlp)
         print("\nvlp_crnr_tad: ", vlp_crnr_ths, vlp_crnr_als, dst_crnr_als)
 
         crnr_pcl = np.row_stack((cam_crnr_xyz, vlp_crnr_xyz))
@@ -422,21 +335,6 @@ class VGNav:
         seg_gp.select_trainable_param()
         seg_gp.minimize_loss()
         self.vis_fit_t = time() - t_f
-
-        ### predict gpfs_sph or grid
-        # gpfs_tnsr = tf.Variable(self.gpfs_sph,  dtype=tf.float32)
-        # t_p = time()
-        # gpfs_nav_cls, gp_seg_var = seg_gp.model.predict_f(gpfs_tnsr)
-        # self.vis_prdct_t = time() - t_p
-        # gp_seg_var = gp_seg_var.numpy()
-        # self.gpfs_nav_cls  = gpfs_nav_cls.numpy()
-        # # print("self.gpfs_nav_cls.shape: ", self.gpfs_nav_cls.shape)
-        # # print("min and max self.gpfs_nav_cls: ",np.min(self.gpfs_nav_cls), np.max(self.gpfs_nav_cls) )
-        # # print("nav_cls: ", nav_cls.numpy().shape, nav_cls.numpy()[0] )
-        # self.gpfs_nav_cls[ self.gpfs_nav_cls<120] = 0
-        # self.gpfs_nav_cls[ self.gpfs_nav_cls>120] = 1
-        # # self.gpfs_nav_cls[ gp_seg_var<np.mean(gp_seg_var)] = 0
-        # # self.gpfs_nav_cls[ gp_seg_var>np.mean(gp_seg_var)] = 1
 
         ### publish nav_gp_grid 
         pub_nav_gp = 1
@@ -649,13 +547,8 @@ class VGNav:
                         gpfs_ths.append(gpf_th)
                         gpfs_th_al.append( [gpf[0][0], 0])
                         gpfs_gmtry.append(0)
- 
 
-
-        print("all geo_gpfs gpfs_nvgblti: ", np.array(gpfs_nvgblti).shape)
-        print("all geo_gpfs gpfs_als: ", np.array(gpfs_als).shape)
-        print("all geo_gpfs gpfs_ths: ", np.array(gpfs_ths).shape)
-        print("all geo_gpfs gpfs_th_al: ", np.array(gpfs_th_al).shape)
+        # print("all geo_gpfs gpfs_nvgblti: ", np.array(gpfs_nvgblti).shape)
         ###### find ids of geometry navigable gpfs
         gpfs_gmtry = np.array(gpfs_gmtry)
         gmtry_nav_gpfs_idx   = np.where( gpfs_gmtry == 1 )
@@ -664,12 +557,8 @@ class VGNav:
         self.gpfs_var     = np.array(gpfs_als).reshape(-1,1)[gmtry_nav_gpfs_idx]
         self.gpfs_gmtry   = np.array(gpfs_gmtry).reshape(-1,1)[gmtry_nav_gpfs_idx]
         self.gpfs_nvgblti = np.array(gpfs_nvgblti).reshape(-1,1)[gmtry_nav_gpfs_idx]
-
-        print("only geo-navigable_gpfs  self.gpfs_sph    : ", self.gpfs_sph.shape)
-        print("only geo-navigable _gpfs self.gpfs_var    : ", self.gpfs_var.shape)
-        print("only geo-navigable_gpfs  self.gpfs_gmtry  : ", self.gpfs_gmtry.shape)
+        # print("only geo-navigable_gpfs  self.gpfs_gmtry  : ", self.gpfs_gmtry.shape)
         # print("only geo-navigable_gpfs  self.gpfs_gmtry  : ", self.gpfs_gmtry)
-        print("only geo-navigable_gpfs  self.gpfs_nvgblti: ", self.gpfs_nvgblti.shape)
         # print("only geo-navigable_gpfs  self.gpfs_nvgblti: ", self.gpfs_nvgblti)
 
 
@@ -701,32 +590,23 @@ class VGNav:
         if(self.gl_dst_err < gl_rds ):
             self.glbl_gl_pbl() 
             print("\t\t******* goal Mode ********")
-
         else: ## goal to selected GPFrontier 
             print("\t\t******* subg Mode ********") 
             self.optm_gpf_cmd_pbl() 
-
-        file = open(self.time_file, "a")
-        np.savetxt( file, np.array( [odom_msg.header.seq, odom_msg.header.stamp.to_sec(), self.geo_fit_t, self.geo_prdct_t, self.vis_fit_t, self.vis_prdct_t], dtype='float32').reshape(-1,6) , delimiter=" ", fmt='%1.3f')
-        file.close()
+        
+        if self.log_data:
+            file = open(self.time_file, "a")
+            np.savetxt( file, np.array( [odom_msg.header.seq, odom_msg.header.stamp.to_sec(), self.geo_fit_t, self.geo_prdct_t, self.vis_fit_t, self.vis_prdct_t], dtype='float32').reshape(-1,6) , delimiter=" ", fmt='%1.3f')
+            file.close()
         gpf_t = time()
         print("#### END Nav time: ", gpf_t- msg_rcvd_time, "\n\n\n")  
-        # self.seg_image()
-        # print("#### Nav time: ", time()- gpf_t)  
 
 
 
-
-
-
-
-
-
-    #################### gpfs_cost_func ####################
     def gpfs_cost_func(self):
         # print("gp_nav_pkup_nav_pt:: ")
         sb_gls_dsts = self.sb_gl_dst * np.ones(self.gpfs_nmbr, dtype='float32').reshape(-1,1)
-        lcl_x, lcl_y, lcl_z = self.convert_spherical_2_cartesian(self.gpfs_sph.T[0].reshape(-1,1), self.gpfs_sph.T[1].reshape(-1,1), sb_gls_dsts)
+        lcl_x, lcl_y, lcl_z = convert_spherical_to_cartesian(self.gpfs_sph.T[0].reshape(-1,1), self.gpfs_sph.T[1].reshape(-1,1), sb_gls_dsts)
         # lcl_z = np.zeros(self.gpfs_nmbr).reshape(-1,1) # not working for 2d TF r
         lcl_z = np.ones(self.gpfs_nmbr).reshape(-1,1) 
         self.sb_gls_xyz_vldyn = np.hstack((lcl_x, lcl_y, lcl_z))
@@ -735,8 +615,12 @@ class VGNav:
 
         #### utlity function 
         sbgl2gl_dsts = np.sqrt( (self.gl_y - self.sb_gls_xyz_wrld.T[1])**2 + (self.gl_x - self.sb_gls_xyz_wrld.T[0])**2 )
-        sbgl2gl_dsts = self.normalize_arr(sbgl2gl_dsts)
-        sbgl2rbt_dir = self.normalize_arr(abs(self.gpfs_sph.T[0]) ) #**2)
+        # sbgl2gl_dsts = self.normalize_array(sbgl2gl_dsts)
+        # sbgl2rbt_dir = self.normalize_array(abs(self.gpfs_sph.T[0]) ) #**2)
+        
+        sbgl2gl_dsts = normalize_array(sbgl2gl_dsts)
+        sbgl2rbt_dir = normalize_array(abs(self.gpfs_sph.T[0]) ) #**2)
+
         g_cost =  self.k_dst*(sbgl2gl_dsts) + self.k_dir*sbgl2rbt_dir
         # g_cost =  self.k_dst*(self.sb_gl_dst + sbgl2gl_dsts) + self.k_dir*sbgl2rbt_dir
         print("cost sbgl2gl_dsts, sbgl2rbt_dir, g_cost: ", sbgl2gl_dsts.shape, sbgl2rbt_dir.shape, g_cost.shape)
@@ -758,30 +642,23 @@ class VGNav:
             nvgblty_cost[v_non_nvgble_ids] = 1
             nvgblty_cost[v_nvgble_ids]     = (1-self.k_nav)*g_cost[v_nvgble_ids]
             nvgblty_cost[out_fov_ids]      = self.k_nav*g_cost[out_fov_ids]  
-            print("nvgblty_cost: ", nvgblty_cost)
+            # print("nvgblty_cost: ", nvgblty_cost)
 
             # self.gpfs_cost_vis =  self.k_nav*nvgblty_cost + self.k_dst*(self.sb_gl_dst + sbgl2gl_dsts) + self.k_dir*sbgl2rbt_dir
             # self.gpfs_cost =  self.k_dst*(self.sb_gl_dst + sbgl2gl_dsts)
             self.gpfs_cost =  self.gpfs_cost_vis = nvgblty_cost
 
-        print("gap_dir: ", sbgl2rbt_dir)
-        print("sbgl2gl_dsts : ", sbgl2gl_dsts)
-        print("self.gpfs_cost_vis : ", self.gpfs_cost)
+        # print("gap_dir: ", sbgl2rbt_dir)
+        # print("sbgl2gl_dsts : ", sbgl2gl_dsts)
+        # print("self.gpfs_cost_vis : ", self.gpfs_cost)
 
         # self.optm_gpf_idx = self.gpfs_cost.argmax(axis=0) ## based on area and direction
         self.optm_gpf_idx = self.gpfs_cost.argmin(axis=0) ## based on area and direction
         self.optm_gpf = self.gpfs_sph[self.optm_gpf_idx]
-        print("self.gpfs_cost: ", self.gpfs_cost.shape)
-        print("self.optm_gpf_idx: ", self.optm_gpf_idx)
-        # print("@optm_gpf_sph: ", self.optm_gpf)
-        # print("@optm_gpf_xy_vldyn: ", self.sb_gls_xyz_vldyn[self.optm_gpf_idx])
-        # print("@optm_gpf_xy_wrld: ", self.sb_gls_xyz_wrld[self.optm_gpf_idx])
+        # print("self.gpfs_cost: ", self.gpfs_cost.shape)
+        # print("self.optm_gpf_idx: ", self.optm_gpf_idx)
 
 
-
-
-
-    #################### vlp pcl ####################
     def vlp_pcl_cb(self,vlp_pcl_msg):
         strt_time = time()
         vlp_pcl_arr = ros_numpy.point_cloud2.pointcloud2_to_xyz_array(vlp_pcl_msg)
@@ -791,7 +668,7 @@ class VGNav:
         vlp_y = vlp_pcl_arr.T[1]
         vlp_z = vlp_pcl_arr.T[2]
 
-        vlp_th, vlp_al, vlp_dst = self.convert_cartesian_2_spherical( vlp_x, vlp_y, vlp_z)
+        vlp_th, vlp_al, vlp_dst = convert_cartesian_to_spherical( vlp_x, vlp_y, vlp_z)
         self.vlp_xyz_pcl = np.row_stack( (vlp_x, vlp_y, vlp_z) )
         # self.vlp_sph_pcl = np.row_stack( (vlp_th, vlp_al, vlp_dst, self.oc_srfc_rds-vlp_dst ) )
         self.vlp_sph_pcl = np.round( np.row_stack( (vlp_th, vlp_al, vlp_dst, self.oc_srfc_rds-vlp_dst ) ), 4)
@@ -806,14 +683,12 @@ class VGNav:
 
         #### publish org_oc_srfc
         srfc_rds = self.org_oc_srfc_rds_viz* np.ones(vlp_th.shape)
-        org_srfc_x, org_srfc_y, org_srfc_z = self.convert_spherical_2_cartesian( vlp_th, vlp_al, srfc_rds)
+        org_srfc_x, org_srfc_y, org_srfc_z = convert_spherical_to_cartesian( vlp_th, vlp_al, srfc_rds)
         org_srfc_arr = np.column_stack( (org_srfc_x, org_srfc_y, org_srfc_z, self.oc_srfc_rds-vlp_dst) )
         org_srfc_pcl = point_cloud2.create_cloud(vlp_pcl_msg.header, self.fields, org_srfc_arr)
         self.org_oc_srfc_pub.publish(org_srfc_pcl)
         print("Pcl_arr time: ", float(time()- strt_time))
 
-
-    #################### odom ####################
     def odom_cb(self, odom_msg):
         self.pose_z = odom_msg.pose.pose.position.z
         self.pose_x = odom_msg.pose.pose.position.x
@@ -835,27 +710,21 @@ class VGNav:
         ang_z = odom_msg.twist.twist.angular.z
         # print("current pose: ", self.pose_x, self.pose_y, self.pose_z, self.yaw)
         ### for saving data
-        # file = open(self.odom_file, "a")
-        # np.savetxt( file, np.array( [odom_msg.header.seq, odom_msg.header.stamp.to_sec() , self.pose_x, self.pose_y, self.pose_z,
-        #                              self.roll, self.pitch, self.yaw, vel_x, vel_y, vel_z, vel_2d, ang_x, ang_y, ang_z], 
-        #                              dtype='float32').reshape(-1,15) , delimiter=" ", fmt='%1.3f')
-        # file.close()
+        if self.log_data:
+            file = open(self.odom_file, "a")
+            np.savetxt( file, np.array( [odom_msg.header.seq, odom_msg.header.stamp.to_sec() , self.pose_x, self.pose_y, self.pose_z,
+                                        self.roll, self.pitch, self.yaw, vel_x, vel_y, vel_z, vel_2d, ang_x, ang_y, ang_z], 
+                                        dtype='float32').reshape(-1,15) , delimiter=" ", fmt='%1.3f')
+            file.close()
 
 
 
-
-
-
-    ########################################################################
-    ############ Processes to get GPF from the GP_nav variance grid  #######
-    ########################################################################
     def rbt2gl_error(self):
         self.gl_dst_err = np.sqrt( (self.gl_x- self.pose_x)**2 + (self.gl_y- self.pose_y)**2)
         self.gl_dir = np.arctan2( self.gl_y- self.pose_y, self.gl_x- self.pose_x)
         # self.rbt_dir = self.pose.theta
         self.gl_dir_err = self.gl_dir - self.yaw
         # print("gl_dst_err, gl_dir_err: ", self.gl_dst_err, self.gl_dir_err )
-
 
 
     ### Form threshold based on varinace mean over variance surface
@@ -877,18 +746,6 @@ class VGNav:
         print("self.gpfs_var_thrshld: ", self.gpfs_var_thrshld)
 
 
-
-
-
-    def normalize_arr(self, arr):
-        min_val = np.min(arr)
-        max_val = np.max(arr)
-        # return (arr - min_val) / (max_val - min_val)
-        return (arr) / (max_val)
-
-
-
-  
     #### publish coordinates of the selected gpfrontier (optm_gpf_idx) as next navigation sub-goal
     def optm_gpf_cmd_pbl(self):
         optm_gpf_xy_wrld = self.sb_gls_xyz_wrld[self.optm_gpf_idx].reshape(3,-1)
@@ -952,7 +809,6 @@ class VGNav:
 
     ##### to convert point coordinates from robot to world frame
     def vldyn2wrld_sb_gls(self, gls):
-        # print("vldyn sbgls: ", gls)
         xy_gls = np.empty([0, 3])
         for gl in gls:
             xy_gls = np.vstack( (xy_gls, self.tf_2d@gl) )
@@ -960,30 +816,27 @@ class VGNav:
         # print("wrld sbgls: ", xy_gls)
         return xy_gls
 
-    ##############################################
+
     ################# visualization ##############
-    ##############################################
     def gpfs_var_pcl_2(self):
         rds = (self.gp_nav_var_viz-0.5)*np.ones(np.shape(self.gpfs_var)[0], dtype='float32').reshape(-1,1)
-        x, y, z = self.convert_spherical_2_cartesian(self.gpfs_sph.T[:][0].reshape(-1,1), self.gpfs_sph.T[:][1].reshape(-1,1), rds)
+        x, y, z = convert_spherical_to_cartesian(self.gpfs_sph.T[:][0].reshape(-1,1), self.gpfs_sph.T[:][1].reshape(-1,1), rds)
         intensity = np.array( self.gpfs_var, dtype='float32').reshape(-1, 1)
         gpfs_var_pcl = np.column_stack( (x, y, z, intensity) )
         pc2 = point_cloud2.create_cloud(self.vldyn_hdr, self.fields, gpfs_var_pcl)
         self.gp_var_srfc_pub.publish(pc2)
-
 
     def gpfs_var_pcl(self):
         rds = (self.gp_nav_var_viz-0.5)*np.ones(np.shape(self.gpfs_var)[0], dtype='float32').reshape(-1,1)
-        x, y, z = self.convert_spherical_2_cartesian(self.gpfs_sph.T[:][0].reshape(-1,1), self.gpfs_sph.T[:][1].reshape(-1,1), rds)
+        x, y, z = convert_spherical_to_cartesian(self.gpfs_sph.T[:][0].reshape(-1,1), self.gpfs_sph.T[:][1].reshape(-1,1), rds)
         intensity = np.array( self.gpfs_var, dtype='float32').reshape(-1, 1)
         gpfs_var_pcl = np.column_stack( (x, y, z, intensity) )
         pc2 = point_cloud2.create_cloud(self.vldyn_hdr, self.fields, gpfs_var_pcl)
         self.gp_var_srfc_pub.publish(pc2)
 
-
     def gp_nav_grd_var_pcl(self):
         rds = self.gp_nav_var_viz*np.ones(np.shape(self.vlp_gp_grd_var)[0], dtype='float32').reshape(-1,1)
-        x, y, z = self.convert_spherical_2_cartesian(self.vlp_gp_grd.T[:][0].reshape(-1,1), self.vlp_gp_grd.T[:][1].reshape(-1,1), rds)
+        x, y, z = convert_spherical_to_cartesian(self.vlp_gp_grd.T[:][0].reshape(-1,1), self.vlp_gp_grd.T[:][1].reshape(-1,1), rds)
         intensity = np.array( self.vlp_gp_grd_var, dtype='float32').reshape(-1, 1)
         nav_grid_var_pcl = np.column_stack( (x, y, z, intensity) )
         pc2 = point_cloud2.create_cloud(self.vldyn_hdr, self.fields, nav_grid_var_pcl)
@@ -991,24 +844,20 @@ class VGNav:
 
     def gp_nav_grd_oc_pcl(self):
         rds = self.gp_oc_srfc_rds_viz*np.ones(np.shape(self.vlp_gp_grd_rds)[0], dtype='float32').reshape(-1,1)
-        x, y, z = self.convert_spherical_2_cartesian(self.vlp_gp_grd.T[:][0].reshape(-1,1), self.vlp_gp_grd.T[:][1].reshape(-1,1), rds)
+        x, y, z = convert_spherical_to_cartesian(self.vlp_gp_grd.T[:][0].reshape(-1,1), self.vlp_gp_grd.T[:][1].reshape(-1,1), rds)
         intensity = np.array( self.vlp_gp_grd_oc, dtype='float32').reshape(-1, 1)
         nav_grid_oc_pcl = np.column_stack( (x, y, z, intensity) )
         pc2 = point_cloud2.create_cloud(self.vldyn_hdr, self.fields, nav_grid_oc_pcl)
         self.gp_oc_srfc_pub.publish(pc2)
 
-
-
     def gpfs_vldyn_pcl(self):
         print("gpfs_vldyn_pcl ..")
         rds = self.sb_gl_dst*np.ones(self.gpfs_nmbr, dtype='float32').reshape(-1,1)
-        x, y, z = self.convert_spherical_2_cartesian(self.gpfs_sph.T[0].reshape(-1,1), self.gpfs_sph.T[1].reshape(-1,1), rds)
+        x, y, z = convert_spherical_to_cartesian(self.gpfs_sph.T[0].reshape(-1,1), self.gpfs_sph.T[1].reshape(-1,1), rds)
         intensity = np.array( self.gpfs_cost_vis, dtype='float32').reshape(-1, 1)
         nav_pts_pcl = np.column_stack( (x, y, z, intensity) )
         pc2 = point_cloud2.create_cloud(self.vldyn_hdr, self.fields, nav_pts_pcl)
         self.gpfs_bslnk_pub.publish(pc2)
-
-
 
     # def gp_nav_xypts_actul_pcl(self):
     #     # print(">> gp_nav_xypts_actul_pcl:: ")
@@ -1020,8 +869,6 @@ class VGNav:
     #     pc2 = point_cloud2.create_cloud(self.wrld_hdr, self.fields, nav_pts_pcl)
     #     self.gpfs_wrld_pub.publish(pc2)
 
-
-
     def publish_goal(self):
         # print(">> publish_goal:: ")
         gl_pcl = np.column_stack( (self.gl_x, self.gl_y, 0, 1) )
@@ -1032,9 +879,7 @@ class VGNav:
 
 
 
-    ########################################################################
     ################# sampling: down sample PCL, sample grid  ##############
-    ########################################################################
     def downsample_pcl(self):  
         pcl_arr = self.vlp_sph_pcl[np.argsort(self.vlp_sph_pcl[0])]
         # pcl_arr = pcl_arr[np.argsort(pcl_arr[:, 0])] ## sort based on thetas
@@ -1065,7 +910,6 @@ class VGNav:
         ## for occupancy 
         # th_rsltion = 0.0174# 0.0174 #0.05 #0.00174  # 0.02 # #from -pi to pi rad -> 0 35999
         # al_rsltion = 0.00149#0.0249 #0.05 #0.0349  #vpl16 resoltuion is 2 deg (from -15 to 15 deg)  
-
         ## for navigation
         th_rsltion = 0.1 #0.00174  # 0.02 # #from -pi to pi rad -> 0 35999
         al_rsltion = 0.05 #0.0349  #vpl16 resoltuion is 2 deg (from -15 to 15 deg)
@@ -1081,34 +925,8 @@ class VGNav:
         # print("al_s: ", np.shape(self.vlp_gp_als))
 
 
-    ########################################################################
-    ################### Coordinates: polar vs cartesian  ###################
-    ########################################################################
-    def convert_spherical_2_cartesian(self, theta, alpha, dist):
-        x = np.array( dist * np.sin(alpha) * np.cos(theta), dtype='float32') # .reshape(-1,1)
-        y = np.array( dist * np.sin(alpha) * np.sin(theta), dtype='float32') # .reshape(-1,1)
-        z = np.array( dist * np.cos(alpha) , dtype='float32') # .reshape(-1,1)
-        return x, y, z
-
-    def convert_cartesian_2_spherical(self, x, y, z):
-        dist = np.sqrt(x**2 + y**2 + z**2) # .reshape(-1,1)
-        theta = np.arctan2(y, x) # .reshape(-1,1)
-        alpha = np.arccos(z / dist) # .reshape(-1,1)
-        return theta, alpha, dist
-
-
 if __name__ == "__main__":
     try:
         VGNav()
     except rospy.ROSInterruptException:
         pass
-
-
-
-
-
-
-
-
-
-

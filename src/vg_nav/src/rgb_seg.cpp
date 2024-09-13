@@ -32,20 +32,16 @@ void thresholdImage()
     cv::inRange(image, cv::Scalar(min_threshold_blue, min_threshold_green, min_threshold_red),
                 cv::Scalar(max_threshold_blue, max_threshold_green, max_threshold_red), thresholded_image);
 
-
 // Apply morphological operations (dilation and erosion) for smoothing
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(4,4));
     cv::morphologyEx(thresholded_image, thresholded_image, cv::MORPH_CLOSE, kernel);
-
-
 
     // Publish the thresholded image
     grey_pub.publish(cv_bridge::CvImage(img_header, "mono8", thresholded_image).toImageMsg());
 }
 
 
-
-void callback(vg_gpn::ThresholdConfig &config, uint32_t level)
+void callback(vg_nav::ThresholdConfig &config, uint32_t level)
 {
     min_threshold_red = config.min_threshold_red;
     max_threshold_red = config.max_threshold_red;
@@ -55,7 +51,6 @@ void callback(vg_gpn::ThresholdConfig &config, uint32_t level)
     max_threshold_blue = config.max_threshold_blue;
     thresholdImage();
 }
-
 
 
 void imageCallback(const sensor_msgs::ImageConstPtr &msg)
@@ -85,8 +80,8 @@ int main(int argc, char **argv)
     grey_pub = nh.advertise<sensor_msgs::Image>("nav_image", 1);
 
     // Dynamic Reconfigure server
-    dynamic_reconfigure::Server<vg_gpn::ThresholdConfig> server;
-    dynamic_reconfigure::Server<vg_gpn::ThresholdConfig>::CallbackType f;
+    dynamic_reconfigure::Server<vg_nav::ThresholdConfig> server;
+    dynamic_reconfigure::Server<vg_nav::ThresholdConfig>::CallbackType f;
     f = boost::bind(&callback, _1, _2);
     server.setCallback(f);
 

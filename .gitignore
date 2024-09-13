@@ -7,3 +7,6 @@ logs/
 .catkin_tools/
 
 
+mask2former*
+
+

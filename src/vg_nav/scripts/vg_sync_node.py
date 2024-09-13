@@ -1,16 +1,12 @@
 #!/usr/bin/env python
-
 import rospy
-import cv2
 import numpy as np
-from sensor_msgs.msg import Image, CameraInfo, PointCloud2, PointField
-import sensor_msgs.point_cloud2 as pc2
+from sensor_msgs.msg import Image, PointCloud2
 from cv_bridge import CvBridge
 import ros_numpy
-import struct
 import time
 from message_filters import ApproximateTimeSynchronizer, Subscriber
-from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from tf.transformations import euler_from_quaternion
 from nav_msgs.msg import Odometry
 
 
@@ -21,37 +17,12 @@ class CamImgPclDownsampling:
         self.old_pos = None
 
         self.sync_header_seq = 0
-        sim_data = 1
-        ## unsync 
-        # self.cam_pcl_sub = rospy.Subscriber('/realsense/depth/color/points', PointCloud2, self.cam_pcl_cb, queue_size=1)
-        # self.cam_img_sub = rospy.Subscriber('/realsense/color/image_raw', Image, self.cam_img_cb, queue_size=1)
-        # self.odom_sub    = rospy.Subscriber('/ground_truth/state', Odometry, self.odom_cb, queue_size=1)
+        self.cam_img_sub = Subscriber('/cam_img', Image)
+        self.cam_pcl_sub = Subscriber('/cam_pcl', PointCloud2)
+        self.vlp_pcl_sub = Subscriber('/vlp_pcl', PointCloud2)
+        self.odom_sub    = Subscriber('/odom', Odometry)
 
-        if sim_data: 
-            # simulation 
-            self.cam_img_sub = Subscriber('/realsense/color/image_raw', Image)
-            self.cam_pcl_sub = Subscriber('/realsense/depth/color/points', PointCloud2)
-            self.vlp_pcl_sub = Subscriber('/mid/points', PointCloud2)
-            # self.vlp_pcl_sub = Subscriber('horizontal/mid/points', PointCloud2)
-            self.odom_sub    = Subscriber('/ground_truth/state', Odometry)
-            
-
-        else:
-            # real data 
-            self.cam_img_sub = Subscriber('/cam_img', Image)
-            self.cam_pcl_sub = Subscriber('/cam_pcl', PointCloud2)
-            self.vlp_pcl_sub = Subscriber('/vlp_pcl', PointCloud2)
-            self.odom_sub    = Subscriber('/odom', Odometry)
-            # self.vlp_pcl_sub = Subscriber('horizontal/mid/points', PointCloud2)
-
-            # self.odom_sub    = Subscriber('/aft_mapped_to_init', Odometry)
-            # self.odom_sub    = Subscriber('/transformed_odom', Odometry)
-            
-            
-
-        self.ats = ApproximateTimeSynchronizer([self.cam_img_sub, self.cam_pcl_sub, self.odom_sub, self.vlp_pcl_sub], queue_size=1, slop=0.1)
-        # self.ats = ApproximateTimeSynchronizer([self.cam_pcl_sub, self.odom_sub], queue_size=1, slop=0.5)
-        
+        self.ats = ApproximateTimeSynchronizer([self.cam_img_sub, self.cam_pcl_sub, self.odom_sub, self.vlp_pcl_sub], queue_size=1, slop=0.1)        
         self.ats.registerCallback(self.sync_callback)
 
 
@@ -60,28 +31,6 @@ class CamImgPclDownsampling:
         self.vlp_pcl_pub = rospy.Publisher('/sync_vlp_pcl', PointCloud2, queue_size=1)
         self.odom_pub    = rospy.Publisher('/sync_odom', Odometry, queue_size=1)
         print("aha a...")
-
-
-    # def cam_img_cb(self, cam_img_msg):
-        # self.cam_img_header = cam_img_msg.header
-        # self.cam_img = self.bridge.imgmsg_to_cv2(cam_img_msg, desired_encoding='passthrough')
-        # print("img frame: ", cam_img_msg.header.frame_id)
-        # print("img frame: ", cam_img_msg.header.stamp.to_sec())
-
-
-    # def cam_pcl_cb(self, cam_pcl_msg):
-    #     self.cam_pcl = cam_pcl_msg
-    #     self.cam_pcl_header = cam_pcl_msg.header
-        # print("cam_pcl frame: ", cam_pcl_msg.header.frame_id)
-        # print("cam_pcl frame: ", cam_pcl_msg.header.stamp.to_sec())
-   
-
-    # def vlp_pcl_cb(self, vlp_pcl_msg):
-    #     self.vlp_pcl = vlp_pcl_msg
-    #     self.vlp_pcl_header = vlp_pcl_msg.header
-        # print("vlp_pcl frame: ", vlp_pcl_msg.header.frame_id)
-        # print("vlp_pcl frame: ", vlp_pcl_msg.header.stamp.to_sec())
-   
 
 
     def odom_cb(self, odom_msg ):
@@ -98,24 +47,14 @@ class CamImgPclDownsampling:
         pos_yw   = euler[2]
         self.crnt_pos = [pos_x, pos_y, pos_z, pos_rol, pos_ptch, pos_yw] 
         # print("current pose: ", self.crnt_pos)
-        # print("vlp_pcl frame: ", vlp_pcl_msg.header.frame_id)
-        # print("\n\n\nvlp_pcl frame: ", odom_msg.header.stamp.to_sec())
-
-
-
-
-
+ 
 
     def sync_callback(self, cam_img_msg, cam_pcl_msg, odom_msg, vlp_pcl_msg):
         t1 = time.time()
         self.odom_cb(odom_msg)
 
-        # self.cam_img_cb(cam_img_msg)
-        # self.cam_pcl_cb(cam_pcl_msg)
-        # self.vlp_pcl_cb(vlp_pcl_msg)
-
-        rbt_motion = 0
-        if rbt_motion:
+        rbt_motion = False  
+        if rbt_motion: # if true, then we won't send new obs till robot moves a distance > dst_th or rotate > orn_th
             if self.old_pos == None:
                 print("first observation, sending new data")
             else:   
@@ -177,7 +116,6 @@ class CamImgPclDownsampling:
         cam_img_msg.header.seq = self.sync_header_seq
         vlp_pcl_msg.header.seq = self.sync_header_seq
         odom_msg.header.seq    = self.sync_header_seq
-
 
         self.raw_img_pub.publish(dwnsmpl_cam_img_msg)
         self.raw_pcl_pub.publish(dwnsmpl_cam_pcl_msg)

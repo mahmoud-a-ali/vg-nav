@@ -3,25 +3,28 @@
 
 
     <!-- load yaml file with all ros param -->
-    <rosparam file="$(find vg_gpn)/config/vg_gpn_real.yaml" />
+    <rosparam file="$(find vg_nav)/config/vg_nav.yaml" />
 
 
+    <node name="vg_sync_node" pkg="vg_nav" type="vg_sync_node.py" >
+        <!-- Simulation with jackal gazebo -->
+        <remap from="odom" to="/ground_truth/state" />
+        <remap from="vlp_pcl" to="/mid/points" />
+        <!-- <remap from="vlp_pcl" to="/horizontal/mid/points" /> -->
+        <remap from="cam_pcl" to="/realsense/depth/color/points" />
+        <remap from="cam_img" to="/realsense/color/image_raw" /> 
 
-    <node name="vg_gpn_real" pkg="vg_gpn" type="vg_gpn_real.py"  output="screen"  >
+        <!-- realhardware with jackal/husky with t265 camera localization or Aloam -->
+        <!-- <remap from="odom" to="/t265/odom/sample" />
+        <remap from="odom" to="/aft_mapped_to_init" />
+        <remap from="vlp_pcl" to="/velodyne_points" />
+        <remap from="cam_pcl" to="/d400/depth/color/points" />
+        <remap from="cam_img" to="/d400/color/image_raw" /> -->
+
     </node> 
 
-
-
-<!-- 
-    <node name="vg_sync_node" pkg="vg_gpn" type="vg_sync_node.py"  output="screen"  >
-            <remap from="odom" to="/t265/odom/sample" />
-            <remap from="vlp_pcl" to="/velodyne_points" />
-            <remap from="cam_pcl" to="/d400/depth/color/points" />
-            <remap from="cam_img" to="/d400/color/image_raw" />
-    </node>  -->
-
-
-
+    <node name="vg_nav_node" pkg="vg_nav" type="vg_nav_node.py"  output="screen"  >
+    </node> 
 
 </launch>
 
