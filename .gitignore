@@ -1,0 +1,11 @@
+# Ignore build directories and logs
+build/
+devel/
+logs/
+
+# Ignore catkin tools directory
+.catkin_tools/
+
+
+
+

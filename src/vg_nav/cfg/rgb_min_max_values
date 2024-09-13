@@ -1,0 +1,33 @@
+!!python/object/new:dynamic_reconfigure.encoding.Config
+dictitems:
+  groups: !!python/object/new:dynamic_reconfigure.encoding.Config
+    dictitems:
+      groups: !!python/object/new:dynamic_reconfigure.encoding.Config
+        state: []
+      id: 0
+      max_threshold_blue: 175.95
+      max_threshold_green: 255.0
+      max_threshold_red: 255.0
+      min_threshold_blue: 107.10000000000001
+      min_threshold_green: 188.7
+      min_threshold_red: 155.55
+      name: Default
+      parameters: !!python/object/new:dynamic_reconfigure.encoding.Config
+        state: []
+      parent: 0
+      state: true
+      threshold_blue: 0.0
+      threshold_green: 0.0
+      threshold_red: 0.0
+      type: ''
+    state: []
+  max_threshold_blue: 175.95
+  max_threshold_green: 255.0
+  max_threshold_red: 255.0
+  min_threshold_blue: 107.10000000000001
+  min_threshold_green: 188.7
+  min_threshold_red: 155.55
+  threshold_blue: 0.0
+  threshold_green: 0.0
+  threshold_red: 0.0
+state: []
